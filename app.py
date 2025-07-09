@@ -84,9 +84,8 @@ load_dotenv()  # load .env for local development
 
 # --- utilities -----------------------------------------------------
 # ----- simple debug toggle ---------------------------------------
-# Set environment variable IPR_DEBUG_GPT=1 (or true) before running the
-# app to print raw GPT output to the console / Streamlit Cloud logs.
-DEBUG_GPT = str(os.getenv("IPR_DEBUG_GPT", "0")).lower() in ("1", "true", "yes")
+# Always show GPT raw output in logs and UI.
+DEBUG_GPT = True  # always show GPT raw output
 
 def safe_int(x, default):
     """
