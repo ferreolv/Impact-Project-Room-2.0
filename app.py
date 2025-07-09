@@ -82,7 +82,16 @@ load_dotenv(dotenv_path)
 from dotenv import load_dotenv
 load_dotenv()  # load .env for local development
 
-
+# --- utilities -----------------------------------------------------
+def safe_int(x, default):
+    """
+    Convert x to int, or return `default` if x is None, empty, or not an int-ish string.
+    """
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return default
+    
 # ── Environment & OpenAI setup ────────────────────────────────────
 from pathlib import Path
 
@@ -514,6 +523,11 @@ def summarize_project_with_gpt(full_text: str) -> Dict[str, Any]:
 
     return summary
 
+raw_output = resp.choices[0].message.content.strip()
+print("\n===== GPT RAW OUTPUT =====")
+print(raw_output)
+print("===== END =====\n")
+
 
 def render_summary_grid(summary: Dict[str, Any]):
     # Combine metadata and AI fields for display
@@ -912,21 +926,14 @@ if is_admin:
         else:
             port_list = []
 
-        # --- Revenue sparkline (last 6 points from revenue_history.csv) ---
-        trend = ""
-        hist_path = os.path.join(base, "revenue_history.csv")
-        if os.path.exists(hist_path):
-            try:
-                hdf = pd.read_csv(hist_path)
-                last_vals = (
-                    hdf.sort_values("Date")["Revenue"]
-                    .tail(6)
-                    .astype(float)
-                    .tolist()
-                )
-                trend = _sparkline(last_vals)
-            except Exception:
-                pass
+        # Parse rejected list (may be string, list, or absent)
+        rej_raw = summary_dict.get("Rejected", [])
+        if isinstance(rej_raw, str):
+            rej_list = [p.strip() for p in rej_raw.split(";") if p.strip()]
+        elif isinstance(rej_raw, list):
+            rej_list = rej_raw
+        else:
+            rej_list = []
 
         # Build filter flags
         flags = []
@@ -1018,6 +1025,11 @@ if is_admin:
             "Market size or SOM (USD)": som_val,
             "Expected IRR (%)": irr_val,
             "Financing need or round size (USD)": fn_val,
+            # Shorthand columns for dashboard
+            "Revenues": rev_val,
+            "SOM": som_val,
+            "IRR": irr_val,
+            "FinancingNeed": fn_val,
             "Instrument": summary_dict.get("Instrument", ""),
             "Use of proceeds (%)": summary_dict.get("Use of proceeds (%)", ""),
             "Impact Area": summary_dict.get("Impact Area", ""),
@@ -1028,8 +1040,7 @@ if is_admin:
             "Status": status,
             "Maturity stage": summary_dict.get("Maturity stage", ""),
             "Portfolio": "; ".join(port_list),
-            "Rejected": "; ".join(rej_list) if 'rej_list' in locals() else "",
-            "Trend": trend,
+            "Rejected": "; ".join(rej_list),
             "LastUpdate": last_update,
         })
 
@@ -1157,13 +1168,15 @@ if is_admin:
 
         # Projects table
         st.subheader("Projects Table")
-        styled = df[[
-            "Project registered name", "Sector", "Region of operation", "Status",
-            "Portfolio", "Revenues", "SOM", "IRR", "FinancingNeed", "Trend", "LastUpdate"
-        ]].style \
-          .applymap(style_status, subset=["Status"]) \
-          .applymap(style_region, subset=["Region of operation"]) \
-          .applymap(style_sector, subset=["Sector"])
+        # Convert list‑type cells to strings so PyArrow can serialise the dataframe
+        df_display = df.applymap(
+            lambda v: "; ".join(map(str, v)) if isinstance(v, list) else v
+        )
+        all_cols = df_display.columns.tolist()
+        styled = df_display[all_cols].style \
+            .applymap(style_status, subset=[c for c in ["Status"] if c in all_cols]) \
+            .applymap(style_region, subset=[c for c in ["Region of operation"] if c in all_cols]) \
+            .applymap(style_sector, subset=[c for c in ["Sector"] if c in all_cols])
         st.dataframe(styled, use_container_width=True)
 
         # ── Detailed “View & Edit Projects” interface ──────────────────
@@ -1778,20 +1791,18 @@ elif is_portfolio_ncge or is_portfolio_ncgd:
                 plt.tight_layout()
                 st.pyplot(fig4, use_container_width=True)
 
-            # Projects table (read-only)
+            # Projects table (read‑only)
             st.subheader("Projects Table")
-            cols_to_show = ["Project Name", "Sector", "Region of operation", "Status"
-                            , "Revenues", "SOM", "IRR", "FinancingNeed",
-                            "Trend", "LastUpdate"]
-            cols = [c for c in cols_to_show if c in dfp.columns]
-            if cols:
-                styled = dfp[cols].style \
-                    .applymap(style_status, subset=[c for c in ["Status"] if c in cols]) \
-                    .applymap(style_region, subset=[c for c in ["Region of operation"] if c in cols]) \
-                    .applymap(style_sector, subset=[c for c in ["Sector"] if c in cols])
-                st.dataframe(styled, use_container_width=True)
-            else:
-                st.info("No data available to display.")
+            # Convert list‑type cells to strings for Arrow compatibility
+            dfp_display = dfp.applymap(
+                lambda v: "; ".join(map(str, v)) if isinstance(v, list) else v
+            )
+            all_cols = dfp_display.columns.tolist()
+            styled = dfp_display[all_cols].style \
+                .applymap(style_status, subset=[c for c in ["Status"] if c in all_cols]) \
+                .applymap(style_region, subset=[c for c in ["Region of operation"] if c in all_cols]) \
+                .applymap(style_sector, subset=[c for c in ["Sector"] if c in all_cols])
+            st.dataframe(styled, use_container_width=True)
 
             # Detailed view and reject option for each portfolio project
             st.subheader("Project Details")
@@ -2268,11 +2279,15 @@ This NDA is governed by Swiss law. Any dispute shall be subject to the exclusive
             value=_int_default(fs.get("Financing need or round size (USD)", "")),
             step=1, format="%d"
         )
+        
         edited["Breakeven year"] = st.number_input(
-            "Breakeven year", min_value=1900, max_value=2100,
-            value=int(fs.get("Breakeven year", datetime.now().year)),
-            step=1
+            "Breakeven year",
+            min_value=1900,
+            max_value=2100,
+            value=safe_int(fs.get("Breakeven year"), datetime.now().year),
+            step=1,
         )
+
         edited["Expected IRR (%)"] = st.number_input(
             "Expected IRR (%)", min_value=0.0, max_value=100.0,
             value=_float_default(fs.get("Expected IRR (%)", "")),
