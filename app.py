@@ -520,6 +520,9 @@ def summarize_project_with_gpt(full_text: str) -> Dict[str, Any]:
             print("\n===== GPT RAW OUTPUT =====")
             print(raw_output)
             print("===== END =====\n")
+            # Display the raw JSON in the Streamlit UI for easy copy‑paste
+            with st.expander("🔍 GPT raw output", expanded=False):
+                st.code(raw_output, language="json")
         # Parse JSON payload from the response
         summary = _parse_json_from_string(raw_output)
     except Exception as e:
