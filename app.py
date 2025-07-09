@@ -83,6 +83,11 @@ from dotenv import load_dotenv
 load_dotenv()  # load .env for local development
 
 # --- utilities -----------------------------------------------------
+# ----- simple debug toggle ---------------------------------------
+# Set environment variable IPR_DEBUG_GPT=1 (or true) before running the
+# app to print raw GPT output to the console / Streamlit Cloud logs.
+DEBUG_GPT = str(os.getenv("IPR_DEBUG_GPT", "0")).lower() in ("1", "true", "yes")
+
 def safe_int(x, default):
     """
     Convert x to int, or return `default` if x is None, empty, or not an int-ish string.
@@ -511,6 +516,10 @@ def summarize_project_with_gpt(full_text: str) -> Dict[str, Any]:
             max_tokens=2000,
         )
         raw_output = resp.choices[0].message.content.strip()
+        if DEBUG_GPT:
+            print("\n===== GPT RAW OUTPUT =====")
+            print(raw_output)
+            print("===== END =====\n")
         # Parse JSON payload from the response
         summary = _parse_json_from_string(raw_output)
     except Exception as e:
@@ -522,11 +531,6 @@ def summarize_project_with_gpt(full_text: str) -> Dict[str, Any]:
         summary.setdefault(key, "Unknown")
 
     return summary
-
-raw_output = resp.choices[0].message.content.strip()
-print("\n===== GPT RAW OUTPUT =====")
-print(raw_output)
-print("===== END =====\n")
 
 
 def render_summary_grid(summary: Dict[str, Any]):
